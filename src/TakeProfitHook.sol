@@ -3,8 +3,8 @@ pragma solidity ^0.8.19;
 
 import {BaseHook} from "periphery-next/BaseHook.sol";
 import {ERC1155} from "openzeppelin-contracts/contracts/token/ERC1155/ERC1155.sol";
-import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {Hooks} from "v4-core/libraries/Hooks.sol";
+import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {PoolId, PoolIdLibrary} from "v4-core/libraries/PoolId.sol";
 import {Currency, CurrencyLibrary} from "v4-core/contracts/libraries/CurrencyLibrary.sol";
 import {IERC20} from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
@@ -182,5 +182,34 @@ contract TakeProfitHook is BaseHook, ERC1155 {
             }
         }
         return delta;
+    }
+
+    function fillOrder(
+        IPoolManager.PoolKey calldata key,
+        int24 tick,
+        bool zeroForOne,
+        int256 amountIn
+    ) internal {
+        IPoolManager.SwapParams memory params = IPoolManager.SwapParams({
+            zeroForOne: zeroForOne,
+            amountSpecified: amountIn,
+            sqrtPriceLimitX96: zeroForOne
+                ? TickMath.MIN_SQRT_RATIO + 1
+                : TickMath.MAX_SQRT_RATIO - 1
+        });
+        BalanceDelta delta = abi.decode(
+            poolManager.lock(
+                abi.encode(this._handleSwap, (key, swapParam)),
+                (BalanceDelta)
+            )
+        );
+
+        takeProfitPositions[key.toId()][tick][zeroForOne] -= amountIn;
+        uint256 tokenId = getTokenId(key, tick, zeroForOne);
+        uint256 amountOfTokenReceivedFromSwap = zeroForOne
+            ? uint256(int256(-delta.amount1()))
+            : uint256(int256(-delta.amount0()));
+
+        tokenIdClaimable[tokenId] += amountOfTokenReceivedFromSwap;
     }
 }
